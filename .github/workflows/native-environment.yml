@@ -1,0 +1,249 @@
+{
+  "name": "Native Docker environment follow-up",
+  "on": {
+    "push": {
+      "branches": [
+        "lab/r-a36d9a96ebb2"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "probe": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 8,
+      "steps": [
+        {
+          "name": "Prepare synthetic environment probes and inspect images",
+          "run": "python3 - <<'PY'\nimport json, os\nprint(\"HOST=\" + json.dumps({k: os.environ.get(k) for k in [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\"]}, sort_keys=True))\nPY\nmkdir -p \"$GITHUB_WORKSPACE/probe-bin\"\nprintf 'workspace-file-marker' > \"$GITHUB_WORKSPACE/fixture.txt\"\nprintf 'temp-file-marker' > \"$RUNNER_TEMP/native-temp.txt\"\nprintf '#!/bin/sh\\nprintf path-tool-marker\\n' > \"$GITHUB_WORKSPACE/probe-bin/lab-path-tool\"\nchmod +x \"$GITHUB_WORKSPACE/probe-bin/lab-path-tool\"\ncat > \"$GITHUB_WORKSPACE/environment.py\" <<'PY'\nimport json, os, pathlib, shutil, sys\nkeys = [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\", \"ALIAS_WS\", \"ALIAS_FILE\", \"ALIAS_TEMP\", \"ALIAS_TEMP_FILE\", \"ALIAS_EMBEDDED\", \"ALIAS_NEAR\", \"INPUT_WORKSPACE\", \"INPUT_FILE\", \"INPUT_TEMP\", \"INPUT_TEMP_FILE\"]\nmode = sys.argv[1] if len(sys.argv) > 1 else \"none\"\nrecord = {\"mode\": mode, \"argv\": sys.argv[2:], \"uid\": os.getuid(), \"gid\": os.getgid(), \"cwd\": os.getcwd(), \"env\": {k: os.environ.get(k) for k in keys}, \"tool\": shutil.which(\"lab-path-tool\")}\nhome_file = pathlib.Path(os.environ[\"HOME\"]) / \"native-home-marker.txt\"\nrecord[\"home_marker_before\"] = home_file.read_text() if home_file.exists() else None\nif mode == \"home-write\":\n    home_file.write_text(\"shared-home-synthetic-marker\")\nrecord[\"home_marker_after\"] = home_file.read_text() if home_file.exists() else None\nrecord[\"alias_files\"] = {}\nfor key in [\"ALIAS_FILE\", \"ALIAS_TEMP_FILE\", \"INPUT_FILE\", \"INPUT_TEMP_FILE\"]:\n    value = os.environ.get(key)\n    if value:\n        target = pathlib.Path(value)\n        record[\"alias_files\"][key] = target.read_text() if target.is_file() else \"MISSING\"\nprint(\"RECORD=\" + json.dumps(record, sort_keys=True))\nPY\ncat > \"$GITHUB_WORKSPACE/nonroot.sh\" <<'SH'\n#!/bin/sh\nprintf 'NONROOT_UID=%s\\n' \"$(id -u)\"\nprintf 'NONROOT_GID=%s\\n' \"$(id -g)\"\nprintf 'NONROOT_HOME=%s\\n' \"$HOME\"\nprintf 'NONROOT_PATH=%s\\n' \"$PATH\"\nprintf 'NONROOT_CWD=%s\\n' \"$PWD\"\nprintf 'NONROOT_MARKER='\ncat \"$HOME/native-home-marker.txt\"\nprintf '\\n'\nSH\nchmod a+rx \"$GITHUB_WORKSPACE/nonroot.sh\"\nfor image in python:3.12-alpine nginxinc/nginx-unprivileged:stable-alpine; do\ndocker pull \"$image\"\ndocker image inspect \"$image\" --format 'CONFIG {{json .RepoDigests}} USER={{json .Config.User}} ENTRYPOINT={{json .Config.Entrypoint}} CMD={{json .Config.Cmd}} ENV={{json .Config.Env}}'\ndone\n"
+        },
+        {
+          "name": "Direct HOME writer with image PATH",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py home-write"
+          }
+        },
+        {
+          "name": "Direct HOME reader with caller HOME override",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py home-read"
+          },
+          "env": {
+            "HOME": "/synthetic/caller-home"
+          }
+        },
+        {
+          "name": "All env values and arbitrary input path aliases",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py aliases",
+            "workspace": "${{ github.workspace }}",
+            "file": "${{ github.workspace }}/fixture.txt",
+            "temp": "${{ runner.temp }}",
+            "temp_file": "${{ runner.temp }}/native-temp.txt"
+          },
+          "env": {
+            "ALIAS_WS": "${{ github.workspace }}",
+            "ALIAS_FILE": "${{ github.workspace }}/fixture.txt",
+            "ALIAS_TEMP": "${{ runner.temp }}",
+            "ALIAS_TEMP_FILE": "${{ runner.temp }}/native-temp.txt",
+            "ALIAS_EMBEDDED": "prefix:${{ github.workspace }}/fixture.txt",
+            "ALIAS_NEAR": "${{ github.workspace }}-suffix"
+          }
+        },
+        {
+          "name": "Append synthetic paths through GITHUB_PATH",
+          "run": "printf \"%s\\n\" \"$GITHUB_WORKSPACE/probe-bin\" /synthetic/host-only-bin >> \"$GITHUB_PATH\""
+        },
+        {
+          "name": "Host observes GITHUB_PATH",
+          "run": "python3 - <<'PY'\nimport json, os, shutil\nprint(\"HOST_AFTER=\" + json.dumps({\"PATH\": os.environ[\"PATH\"], \"tool\": shutil.which(\"lab-path-tool\")}, sort_keys=True))\nPY\n"
+        },
+        {
+          "name": "Direct PATH after GITHUB_PATH without step PATH",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py path-after"
+          }
+        },
+        {
+          "name": "Direct explicit step PATH after GITHUB_PATH",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py path-explicit"
+          },
+          "env": {
+            "PATH": "${{ github.workspace }}/probe-bin:/usr/local/bin:/usr/bin:/bin"
+          }
+        },
+        {
+          "name": "Nonroot public image retains configured USER",
+          "uses": "docker://nginxinc/nginx-unprivileged:stable-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/bin/sh",
+            "args": "/github/workspace/nonroot.sh"
+          }
+        },
+        {
+          "name": "Backslash parity outside quotes n=0",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py outside-0 left a\"b c\" right"
+          }
+        },
+        {
+          "name": "Backslash parity inside quotes n=0",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py inside-0 left \"a\"b\" right"
+          }
+        },
+        {
+          "name": "Backslash parity outside quotes n=1",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py outside-1 left a\\\"b c\" right"
+          }
+        },
+        {
+          "name": "Backslash parity inside quotes n=1",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py inside-1 left \"a\\\"b\" right"
+          }
+        },
+        {
+          "name": "Backslash parity outside quotes n=2",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py outside-2 left a\\\\\"b c\" right"
+          }
+        },
+        {
+          "name": "Backslash parity inside quotes n=2",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py inside-2 left \"a\\\\\"b\" right"
+          }
+        },
+        {
+          "name": "Backslash parity outside quotes n=3",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py outside-3 left a\\\\\\\"b c\" right"
+          }
+        },
+        {
+          "name": "Backslash parity inside quotes n=3",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py inside-3 left \"a\\\\\\\"b\" right"
+          }
+        },
+        {
+          "name": "Backslash parity outside quotes n=4",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py outside-4 left a\\\\\\\\\"b c\" right"
+          }
+        },
+        {
+          "name": "Backslash parity inside quotes n=4",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py inside-4 left \"a\\\\\\\\\"b\" right"
+          }
+        },
+        {
+          "name": "Consecutive quote case 1",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py consecutive-1 left \"\"\"\" right"
+          }
+        },
+        {
+          "name": "Consecutive quote case 2",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py consecutive-2 left a\"\"b right"
+          }
+        },
+        {
+          "name": "Consecutive quote case 3",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py consecutive-3 left \"a\"\"b\" right"
+          }
+        },
+        {
+          "name": "Consecutive quote case 4",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py consecutive-4 left \"a\"\"\"b\" right"
+          }
+        },
+        {
+          "name": "Consecutive quote case 5",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py consecutive-5 left \"\" \"\" right"
+          }
+        },
+        {
+          "name": "Consecutive quote case 6",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/environment.py consecutive-6 left pre\"\"\"\"post right"
+          }
+        }
+      ]
+    }
+  }
+}
