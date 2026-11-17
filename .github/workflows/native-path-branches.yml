@@ -1,0 +1,190 @@
+{
+  "name": "Native Docker PATH branches and job siblings",
+  "on": {
+    "push": {
+      "branches": [
+        "lab/r-52495ec8a90d"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "env": {
+    "PATH": "/synthetic/workflow-bin:/usr/local/bin:/usr/bin:/bin"
+  },
+  "jobs": {
+    "workflow-path": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 8,
+      "steps": [
+        {
+          "name": "Prepare and record parent environment",
+          "run": "/usr/bin/python3 - <<'PY'\nimport json, os, pathlib\nprint(\"PARENT=\" + json.dumps({k: os.environ.get(k) for k in [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\", \"CTX_WS\", \"CTX_TEMP\"]}, sort_keys=True))\nworkspace = pathlib.Path(os.environ[\"GITHUB_WORKSPACE\"])\n(workspace / \"branch-bin\").mkdir(exist_ok=True)\ntool = workspace / \"branch-bin\" / \"branch-tool\"\ntool.write_text(\"#!/bin/sh\\nprintf branch-tool-marker\\n\")\ntool.chmod(0o755)\n(workspace / \"branch-fixture.txt\").write_text(\"branch-workspace-marker\")\n(pathlib.Path(os.environ[\"RUNNER_TEMP\"]) / \"branch-temp.txt\").write_text(\"branch-temp-marker\")\nPY\ncat > \"$GITHUB_WORKSPACE/branches.py\" <<'PY'\nimport json, os, pathlib, shutil, sys\nkeys = [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\", \"ALIAS_WS\", \"ALIAS_FILE\", \"ALIAS_TEMP\", \"ALIAS_TEMP_FILE\", \"INPUT_WORKSPACE\", \"INPUT_FILE\", \"INPUT_TEMP\", \"INPUT_TEMP_FILE\"]\nrecord = {\"mode\": sys.argv[1], \"env\": {k: os.environ.get(k) for k in keys}, \"cwd\": os.getcwd(), \"uid\": os.getuid(), \"tool\": shutil.which(\"branch-tool\")}\nhome_file = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nrecord[\"home_before\"] = home_file.read_text() if home_file.is_file() else None\nif sys.argv[1] == \"sibling-write\":\n    home_file.write_text(\"sibling-direct-marker\")\nrecord[\"home_after\"] = home_file.read_text() if home_file.is_file() else None\nrecord[\"files\"] = {}\nfor key in [\"ALIAS_FILE\", \"ALIAS_TEMP_FILE\", \"INPUT_FILE\", \"INPUT_TEMP_FILE\"]:\n    if os.environ.get(key):\n        path = pathlib.Path(os.environ[key])\n        record[\"files\"][key] = path.read_text() if path.is_file() else \"MISSING\"\nprint(\"RECORD=\" + json.dumps(record, sort_keys=True))\nPY\n",
+          "env": {
+            "CTX_WS": "${{ github.workspace }}",
+            "CTX_TEMP": "${{ runner.temp }}"
+          }
+        },
+        {
+          "name": "Append GITHUB_PATH branches",
+          "run": "printf \"%s\\n\" \"$GITHUB_WORKSPACE/branch-bin\" /synthetic/added-bin >> \"$GITHUB_PATH\""
+        },
+        {
+          "name": "Workflow PATH parent after additions",
+          "run": "/usr/bin/python3 - <<'PY'\nimport json, os, pathlib, shutil\np = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nprint(\"CONTROL=\" + json.dumps({\"HOME\": os.environ[\"HOME\"], \"PATH\": os.environ[\"PATH\"], \"GITHUB_WORKSPACE\": os.environ[\"GITHUB_WORKSPACE\"], \"RUNNER_TEMP\": os.environ[\"RUNNER_TEMP\"], \"tool\": shutil.which(\"branch-tool\"), \"home_marker\": p.read_text() if p.is_file() else None}, sort_keys=True))\nPY\n"
+        },
+        {
+          "name": "workflow-path-after-additions",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/branches.py workflow-path-after-additions"
+          }
+        },
+        {
+          "name": "host-path-nonleading-workspace",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/branches.py host-path-nonleading-workspace"
+          },
+          "env": {
+            "PATH": "/usr/local/bin:${{ github.workspace }}/branch-bin:/usr/bin:/bin"
+          }
+        }
+      ]
+    },
+    "job-and-env-path": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 8,
+      "env": {
+        "PATH": "/synthetic/job-bin:/usr/local/bin:/usr/bin:/bin"
+      },
+      "steps": [
+        {
+          "name": "Prepare and record parent environment",
+          "run": "/usr/bin/python3 - <<'PY'\nimport json, os, pathlib\nprint(\"PARENT=\" + json.dumps({k: os.environ.get(k) for k in [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\", \"CTX_WS\", \"CTX_TEMP\"]}, sort_keys=True))\nworkspace = pathlib.Path(os.environ[\"GITHUB_WORKSPACE\"])\n(workspace / \"branch-bin\").mkdir(exist_ok=True)\ntool = workspace / \"branch-bin\" / \"branch-tool\"\ntool.write_text(\"#!/bin/sh\\nprintf branch-tool-marker\\n\")\ntool.chmod(0o755)\n(workspace / \"branch-fixture.txt\").write_text(\"branch-workspace-marker\")\n(pathlib.Path(os.environ[\"RUNNER_TEMP\"]) / \"branch-temp.txt\").write_text(\"branch-temp-marker\")\nPY\ncat > \"$GITHUB_WORKSPACE/branches.py\" <<'PY'\nimport json, os, pathlib, shutil, sys\nkeys = [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\", \"ALIAS_WS\", \"ALIAS_FILE\", \"ALIAS_TEMP\", \"ALIAS_TEMP_FILE\", \"INPUT_WORKSPACE\", \"INPUT_FILE\", \"INPUT_TEMP\", \"INPUT_TEMP_FILE\"]\nrecord = {\"mode\": sys.argv[1], \"env\": {k: os.environ.get(k) for k in keys}, \"cwd\": os.getcwd(), \"uid\": os.getuid(), \"tool\": shutil.which(\"branch-tool\")}\nhome_file = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nrecord[\"home_before\"] = home_file.read_text() if home_file.is_file() else None\nif sys.argv[1] == \"sibling-write\":\n    home_file.write_text(\"sibling-direct-marker\")\nrecord[\"home_after\"] = home_file.read_text() if home_file.is_file() else None\nrecord[\"files\"] = {}\nfor key in [\"ALIAS_FILE\", \"ALIAS_TEMP_FILE\", \"INPUT_FILE\", \"INPUT_TEMP_FILE\"]:\n    if os.environ.get(key):\n        path = pathlib.Path(os.environ[key])\n        record[\"files\"][key] = path.read_text() if path.is_file() else \"MISSING\"\nprint(\"RECORD=\" + json.dumps(record, sort_keys=True))\nPY\n",
+          "env": {
+            "CTX_WS": "${{ github.workspace }}",
+            "CTX_TEMP": "${{ runner.temp }}"
+          }
+        },
+        {
+          "name": "Append GITHUB_PATH branches",
+          "run": "printf \"%s\\n\" \"$GITHUB_WORKSPACE/branch-bin\" /synthetic/added-bin >> \"$GITHUB_PATH\""
+        },
+        {
+          "name": "Job PATH parent after additions",
+          "run": "/usr/bin/python3 - <<'PY'\nimport json, os, pathlib, shutil\np = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nprint(\"CONTROL=\" + json.dumps({\"HOME\": os.environ[\"HOME\"], \"PATH\": os.environ[\"PATH\"], \"GITHUB_WORKSPACE\": os.environ[\"GITHUB_WORKSPACE\"], \"RUNNER_TEMP\": os.environ[\"RUNNER_TEMP\"], \"tool\": shutil.which(\"branch-tool\"), \"home_marker\": p.read_text() if p.is_file() else None}, sort_keys=True))\nPY\n"
+        },
+        {
+          "name": "job-path-after-additions",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/branches.py job-path-after-additions"
+          }
+        },
+        {
+          "name": "Set PATH through GITHUB_ENV after additions",
+          "run": "printf \"PATH=/synthetic/github-env-bin:/usr/local/bin:/usr/bin:/bin\\n\" >> \"$GITHUB_ENV\""
+        },
+        {
+          "name": "GITHUB_ENV PATH parent after additions",
+          "run": "/usr/bin/python3 - <<'PY'\nimport json, os, pathlib, shutil\np = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nprint(\"CONTROL=\" + json.dumps({\"HOME\": os.environ[\"HOME\"], \"PATH\": os.environ[\"PATH\"], \"GITHUB_WORKSPACE\": os.environ[\"GITHUB_WORKSPACE\"], \"RUNNER_TEMP\": os.environ[\"RUNNER_TEMP\"], \"tool\": shutil.which(\"branch-tool\"), \"home_marker\": p.read_text() if p.is_file() else None}, sort_keys=True))\nPY\n"
+        },
+        {
+          "name": "github-env-path-after-additions",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/branches.py github-env-path-after-additions"
+          }
+        }
+      ]
+    },
+    "job-container-siblings": {
+      "runs-on": "ubuntu-latest",
+      "container": "python:3.12-alpine",
+      "timeout-minutes": 8,
+      "steps": [
+        {
+          "name": "Prepare and record parent environment",
+          "run": "/usr/local/bin/python3 - <<'PY'\nimport json, os, pathlib\nprint(\"PARENT=\" + json.dumps({k: os.environ.get(k) for k in [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\", \"CTX_WS\", \"CTX_TEMP\"]}, sort_keys=True))\nworkspace = pathlib.Path(os.environ[\"GITHUB_WORKSPACE\"])\n(workspace / \"branch-bin\").mkdir(exist_ok=True)\ntool = workspace / \"branch-bin\" / \"branch-tool\"\ntool.write_text(\"#!/bin/sh\\nprintf branch-tool-marker\\n\")\ntool.chmod(0o755)\n(workspace / \"branch-fixture.txt\").write_text(\"branch-workspace-marker\")\n(pathlib.Path(os.environ[\"RUNNER_TEMP\"]) / \"branch-temp.txt\").write_text(\"branch-temp-marker\")\nPY\ncat > \"$GITHUB_WORKSPACE/branches.py\" <<'PY'\nimport json, os, pathlib, shutil, sys\nkeys = [\"HOME\", \"PATH\", \"GITHUB_WORKSPACE\", \"RUNNER_TEMP\", \"ALIAS_WS\", \"ALIAS_FILE\", \"ALIAS_TEMP\", \"ALIAS_TEMP_FILE\", \"INPUT_WORKSPACE\", \"INPUT_FILE\", \"INPUT_TEMP\", \"INPUT_TEMP_FILE\"]\nrecord = {\"mode\": sys.argv[1], \"env\": {k: os.environ.get(k) for k in keys}, \"cwd\": os.getcwd(), \"uid\": os.getuid(), \"tool\": shutil.which(\"branch-tool\")}\nhome_file = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nrecord[\"home_before\"] = home_file.read_text() if home_file.is_file() else None\nif sys.argv[1] == \"sibling-write\":\n    home_file.write_text(\"sibling-direct-marker\")\nrecord[\"home_after\"] = home_file.read_text() if home_file.is_file() else None\nrecord[\"files\"] = {}\nfor key in [\"ALIAS_FILE\", \"ALIAS_TEMP_FILE\", \"INPUT_FILE\", \"INPUT_TEMP_FILE\"]:\n    if os.environ.get(key):\n        path = pathlib.Path(os.environ[key])\n        record[\"files\"][key] = path.read_text() if path.is_file() else \"MISSING\"\nprint(\"RECORD=\" + json.dumps(record, sort_keys=True))\nPY\nprintf job-container-home-marker > \"$HOME/branch-home-marker.txt\"\n",
+          "env": {
+            "CTX_WS": "${{ github.workspace }}",
+            "CTX_TEMP": "${{ runner.temp }}"
+          }
+        },
+        {
+          "name": "Append GITHUB_PATH branches",
+          "run": "printf \"%s\\n\" \"$GITHUB_WORKSPACE/branch-bin\" /synthetic/added-bin >> \"$GITHUB_PATH\""
+        },
+        {
+          "name": "Job container before sibling steps",
+          "run": "/usr/local/bin/python3 - <<'PY'\nimport json, os, pathlib, shutil\np = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nprint(\"CONTROL=\" + json.dumps({\"HOME\": os.environ[\"HOME\"], \"PATH\": os.environ[\"PATH\"], \"GITHUB_WORKSPACE\": os.environ[\"GITHUB_WORKSPACE\"], \"RUNNER_TEMP\": os.environ[\"RUNNER_TEMP\"], \"tool\": shutil.which(\"branch-tool\"), \"home_marker\": p.read_text() if p.is_file() else None}, sort_keys=True))\nPY\n"
+        },
+        {
+          "name": "sibling-write",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/branches.py sibling-write",
+            "workspace": "${{ github.workspace }}",
+            "file": "${{ github.workspace }}/branch-fixture.txt",
+            "temp": "${{ runner.temp }}",
+            "temp_file": "${{ runner.temp }}/branch-temp.txt"
+          },
+          "env": {
+            "ALIAS_WS": "${{ github.workspace }}",
+            "ALIAS_FILE": "${{ github.workspace }}/branch-fixture.txt",
+            "ALIAS_TEMP": "${{ runner.temp }}",
+            "ALIAS_TEMP_FILE": "${{ runner.temp }}/branch-temp.txt"
+          }
+        },
+        {
+          "name": "sibling-read-caller-home",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/branches.py sibling-read-caller-home",
+            "workspace": "${{ github.workspace }}",
+            "file": "${{ github.workspace }}/branch-fixture.txt",
+            "temp": "${{ runner.temp }}",
+            "temp_file": "${{ runner.temp }}/branch-temp.txt"
+          },
+          "env": {
+            "ALIAS_WS": "${{ github.workspace }}",
+            "ALIAS_FILE": "${{ github.workspace }}/branch-fixture.txt",
+            "ALIAS_TEMP": "${{ runner.temp }}",
+            "ALIAS_TEMP_FILE": "${{ runner.temp }}/branch-temp.txt",
+            "HOME": "/synthetic/sibling-caller-home"
+          }
+        },
+        {
+          "name": "sibling-path-nonleading-workspace",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/usr/local/bin/python3",
+            "args": "/github/workspace/branches.py sibling-path-nonleading-workspace"
+          },
+          "env": {
+            "PATH": "/usr/local/bin:${{ github.workspace }}/branch-bin:/usr/bin:/bin"
+          }
+        },
+        {
+          "name": "Job container after sibling steps",
+          "run": "/usr/local/bin/python3 - <<'PY'\nimport json, os, pathlib, shutil\np = pathlib.Path(os.environ[\"HOME\"]) / \"branch-home-marker.txt\"\nprint(\"CONTROL=\" + json.dumps({\"HOME\": os.environ[\"HOME\"], \"PATH\": os.environ[\"PATH\"], \"GITHUB_WORKSPACE\": os.environ[\"GITHUB_WORKSPACE\"], \"RUNNER_TEMP\": os.environ[\"RUNNER_TEMP\"], \"tool\": shutil.which(\"branch-tool\"), \"home_marker\": p.read_text() if p.is_file() else None}, sort_keys=True))\nPY\n"
+        }
+      ]
+    }
+  }
+}
