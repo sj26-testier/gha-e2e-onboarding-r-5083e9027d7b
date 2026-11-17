@@ -1,0 +1,258 @@
+{
+  "name": "Native direct Docker argv evidence",
+  "on": {
+    "push": {
+      "branches": [
+        "lab/r-5083e9027d7b"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "probe": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 8,
+      "steps": [
+        {
+          "name": "Install synthetic argv probe and record public image configuration",
+          "run": "cat > \"$GITHUB_WORKSPACE/probe\" <<'PROBE'\n#!/bin/sh\nprintf 'PROBE_BEGIN argc=%s\\n' \"$#\"\nfor arg in \"$@\"; do\n  printf 'ARG_HEX='\n  printf '%s' \"$arg\" | od -An -v -tx1 | tr -d ' \\n'\n  printf '\\n'\ndone\nenv | LC_ALL=C sort | sed -n '/^INPUT_/p'\nprintf 'PROBE_END\\n'\nPROBE\nchmod +x \"$GITHUB_WORKSPACE/probe\"\nfor image in alpine/git:2.47.2 python:3.12-alpine; do\ndocker pull \"$image\"\ndocker image inspect \"$image\" --format 'CONFIG {{json .RepoDigests}} ENTRYPOINT={{json .Config.Entrypoint}} CMD={{json .Config.Cmd}}'\ndone\n"
+        },
+        {
+          "name": "args omitted; override entrypoint",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "args empty",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "args whitespace only",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "  \t   ",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "double quoted empty",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "\"\"",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "single quoted empty",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "''",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "double quoted group",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left \"two words\" right",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "single quoted group",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left 'two words' right",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "adjacent double quoted spans",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left pre\"two words\"post right",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "single quote inside double quotes",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left \"a'b c\" right",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "double quote inside single quotes",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left 'a\"b c' right",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "unclosed double quote",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left \"two words",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "unclosed single quote",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left 'two words",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "backslashes",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left a\\ b C:\\tmp\\file \"a\\\"b\" tail\\\\",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "literal shell metacharacters",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left $HOME ${HOME} $(id) `id` ; && || | > < * ? ~ right",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "quoted empty between values",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "left \"\" middle '' right",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "uppercase ARGS and ENTRYPOINT",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "ARGS": "upper \"two words\" tail",
+            "ENTRYPOINT": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "mixed case aRgS and eNtRyPoInT",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "aRgS": "mixed \"two words\" tail",
+            "eNtRyPoInT": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "arbitrary inputs",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "marker",
+            "entrypoint": "/github/workspace/probe",
+            "custom": "hello input",
+            "MiXeD-Key": "mixed value",
+            "under_score": "under value"
+          }
+        },
+        {
+          "name": "git image ENTRYPOINT and CMD defaults",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true
+        },
+        {
+          "name": "git image ENTRYPOINT retained explicit args",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "--version"
+          }
+        },
+        {
+          "name": "git image ENTRYPOINT retained empty args",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": ""
+          }
+        },
+        {
+          "name": "git image ENTRYPOINT retained whitespace args",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "   "
+          }
+        },
+        {
+          "name": "python image null ENTRYPOINT and CMD defaults",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true
+        },
+        {
+          "name": "python CMD under entrypoint override omitted args",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "python CMD under entrypoint override empty args",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "args": "",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "python CMD under entrypoint override whitespace args",
+          "uses": "docker://python:3.12-alpine",
+          "continue-on-error": true,
+          "with": {
+            "args": "   ",
+            "entrypoint": "/github/workspace/probe"
+          }
+        },
+        {
+          "name": "empty entrypoint retains image entrypoint",
+          "uses": "docker://alpine/git:2.47.2",
+          "continue-on-error": true,
+          "with": {
+            "args": "--version",
+            "entrypoint": ""
+          }
+        }
+      ]
+    }
+  }
+}
